@@ -1,13 +1,12 @@
 # Extension Readiness
 
 ## Which extension would your design support best?
-The current design best supports **adding a new card effect or rule variant**.
+The current design best supports **adding a smarter bot strategy** or **adding a replay log**. 
 
 ## Where would that change be implemented?
-Because the responsibilities are now separated, adding a new card (like a "Skip Everyone" card) would only require two clean changes:
-1. Updating `UnoRules.java` so `rank()` and `points()` know how to identify and score the new card string.
-2. Updating the `applyCardEffect()` method in `Main.java` to execute the specific turn-manipulation logic (e.g., advancing the `currentPlayer` index multiple times).
-   We no longer have to hunt through a massive game loop or update duplicate bot logic to make this happen.
+Because the architecture is now fully separated:
+1. **Smarter Bots:** We would only need to update the `BotStrategy.java` class. Since the bots now have their own isolated decision-making logic, we could easily pass the `GameState` to them to allow for card-counting or predictive strategies without touching the core game loop.
+2. **Replay Log:** Because all mutable state is now safely encapsulated inside the `GameState` object, we could easily track every turn by logging snapshots of `GameState` after each move in `GameEngine`, without worrying about rogue methods mutating global arrays.
 
 ## What part of your design still makes change difficult?
-The system's reliance on global static arrays for the `deck`, `discard`, and player `hands` in `Main.java` makes structural changes difficult. For instance, adding a "Replay Log" extension or a "Smarter Bot Strategy" would be risky because any method can accidentally overwrite the global deck state. To fully support those features, the next refactoring step would be to extract a `GameState` object to encapsulate and protect the deck and player hands.
+The biggest remaining friction point is replacing the CLI view with a graphical user interface (GUI). Right now, console printing (`System.out.println`) and user input (`Scanner`) are directly hardcoded inside the `GameEngine.java` orchestration loop. To add a GUI, we would need to further decouple the engine by extracting a dedicated `View` interface so the engine doesn't care whether it is talking to a terminal or a visual window.
