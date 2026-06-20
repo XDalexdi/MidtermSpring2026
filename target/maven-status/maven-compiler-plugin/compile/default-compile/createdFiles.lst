@@ -1,5 +1,8 @@
+Main.class
+PlayerScoreEntity.class
+BotStrategy.class
+GameRecordEntity.class
 GameState.class
 GameEngine.class
-Main.class
-BotStrategy.class
 UnoRules.class
+UnoGameRepository.class
