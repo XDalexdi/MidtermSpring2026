@@ -1,117 +1,149 @@
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 import java.util.logging.Logger;
 
 public class GameEngine {
     private static final Logger logger = Logger.getLogger(GameEngine.class.getName());
-    private GameState state;
     private boolean quiet;
     private Scanner scanner;
 
-    public GameEngine(GameState state, boolean quiet, Scanner scanner) {
-        this.state = state;
+    // Core Game State mapped to our new Object-Oriented classes
+    private UnoDeck deck;
+    private TurnManager turnManager;
+    private UnoCallManager callManager;
+    private List<List<UnoCard>> playerHands;
+    private List<String> playerNames;
+    private List<Boolean> isHumanPlayer;
+    private UnoCard topCard;
+    private CardColor activeColor;
+
+    public GameEngine(List<String> playerNames, List<Boolean> isHumanPlayer, boolean quiet, Scanner scanner) {
+        this.playerNames = playerNames;
+        this.isHumanPlayer = isHumanPlayer;
         this.quiet = quiet;
         this.scanner = scanner;
     }
 
     public boolean runGame() {
-        state.prepareNewGame();
-        int guard = 0;
-        logger.info("New game prepared and started. First player: " + state.playerNames.get(state.currentPlayer));
+        // --- STEP 1: INITIALIZE THE GAME ---
+        deck = new UnoDeck();
+        deck.shuffle();
+        turnManager = new TurnManager(playerNames.size());
+        callManager = new UnoCallManager();
+        playerHands = new ArrayList<>();
 
+        for (int i = 0; i < playerNames.size(); i++) {
+            List<UnoCard> hand = new ArrayList<>();
+            for (int c = 0; c < 7; c++) {
+                hand.add(deck.getCards().remove(0));
+            }
+            playerHands.add(hand);
+        }
+
+        topCard = deck.getCards().remove(0);
+        activeColor = topCard.getColor();
+        if (activeColor == CardColor.WILD) {
+            activeColor = CardColor.RED;
+        }
+
+        logger.info("New game prepared and started. First player: " + playerNames.get(0));
+
+        int guard = 0;
+
+        // --- STEP 2: THE GAME LOOP ---
         while (guard < 3000) {
             guard++;
-            String name = state.playerNames.get(state.currentPlayer);
-            ArrayList<String> hand = state.hands.get(state.currentPlayer);
+            int currentPlayerIndex = turnManager.getCurrentPlayerIndex();
+            String name = playerNames.get(currentPlayerIndex);
+            List<UnoCard> hand = playerHands.get(currentPlayerIndex);
+            boolean isHuman = isHumanPlayer.get(currentPlayerIndex);
 
             logger.info("Turn started for player: " + name);
 
             if (!quiet) {
-                System.out.println("\nUp card: " + state.upCard + (state.calledColor.equals("") ? "" : " called " + state.calledColor));
-                System.out.println(name + " hand: " + join(hand));
+                System.out.println("\n------------------------------------------------");
+                System.out.println("Up card: " + topCard + (topCard.getColor() == CardColor.WILD ? " (Called Color: " + activeColor + ")" : ""));
+                System.out.println(name + "'s hand: " + join(hand));
             }
 
-            int chosen = -1;
-            boolean isHuman = state.humanPlayers.get(state.currentPlayer);
+            // --- STEP 3: PROCESS TURNS ---
+            UnoCard chosenCard = null;
 
             if (isHuman) {
-                chosen = askHuman(hand);
+                chosenCard = askHumanPlay(hand);
             } else {
-                chosen = BotStrategy.chooseCard(hand, state.upCard, state.calledColor);
-            }
-
-            if (chosen == -1) {
-                String drawn = state.drawCard();
-                hand.add(drawn);
-                logger.info(name + " drew a card: " + drawn);
-                if (!quiet) System.out.println(name + " draws " + drawn);
-
-                if (UnoRules.isLegal(drawn, state.upCard, state.calledColor)) {
-                    if (!isHuman) {
-                        chosen = hand.size() - 1;
-                    } else {
-                        System.out.print("Play drawn card " + drawn + "? y/n: ");
-                        String answer = scanner.nextLine();
-                        if (answer.equalsIgnoreCase("y") || answer.equalsIgnoreCase("yes")) chosen = hand.size() - 1;
+                for (UnoCard card : hand) {
+                    if (UnoRuleValidator.isLegalPlay(card, topCard, activeColor)) {
+                        chosenCard = card;
+                        break;
                     }
                 }
             }
 
-            if (chosen >= 0) {
-                if (chosen >= hand.size()) {
-                    logger.warning("Invalid input attempted by: " + name + " (Index out of bounds)");
-                    if (!quiet) System.out.println(name + " selected an invalid index and draws a penalty card.");
-                    hand.add(state.drawCard());
-                    state.nextPlayer();
-                    continue;
+            if (chosenCard == null) {
+                UnoCard drawn = CardEffectHandler.drawSingleCard(deck, hand);
+                logger.info(name + " drew a card.");
+                if (!quiet) System.out.println(name + " draws a card and passes.");
+            } else {
+                hand.remove(chosenCard);
+                topCard = chosenCard;
+                activeColor = chosenCard.getColor();
+
+                logger.info(name + " successfully played: " + chosenCard);
+                if (!quiet) System.out.println(name + " plays " + chosenCard);
+
+                if (chosenCard.getColor() == CardColor.WILD) {
+                    if (isHuman) {
+                        activeColor = askColor();
+                    } else {
+                        activeColor = CardColor.RED;
+                    }
+                    logger.info(name + " calls color: " + activeColor);
+                    if (!quiet) System.out.println(name + " calls " + activeColor);
                 }
 
-                String card = hand.get(chosen);
-                boolean ok = UnoRules.isLegal(card, state.upCard, state.calledColor);
-                if (!ok) {
-                    logger.warning("Illegal card play attempted by: " + name + " (Card: " + card + ")");
-                    if (!quiet) System.out.println(name + " tried illegal card " + card + " and draws a penalty card.");
-                    hand.add(state.drawCard());
-                    state.nextPlayer();
-                    continue;
+                if (hand.size() == 1) {
+                    callManager.callUno();
+                    if (!quiet) System.out.println(name + " yells UNO!");
                 }
 
-                hand.remove(chosen);
-                state.discard.add(state.upCard);
-                state.upCard = card;
-                state.calledColor = "";
-
-                logger.info(name + " successfully played: " + card);
-                if (!quiet) System.out.println(name + " plays " + card);
-
-                if (card.equals("W") || card.equals("W4")) {
-                    if (isHuman) state.calledColor = askColor();
-                    else state.calledColor = BotStrategy.chooseColor(hand);
-
-                    logger.info(name + " calls color: " + state.calledColor);
-                    if (!quiet) System.out.println(name + " calls " + state.calledColor);
-                }
-
-                if (hand.size() == 1 && !quiet) System.out.println(name + " says UNO!");
-
+                // --- STEP 5: CALCULATE THE WINNER ---
                 if (hand.isEmpty()) {
-                    int points = state.calculatePoints(state.currentPlayer);
-                    logger.info("Game finished. Winner: " + name + " with " + points + " points.");
-                    if (!quiet) System.out.println(name + " wins and scores " + points);
+                    int totalPoints = 0;
+                    for (int i = 0; i < playerHands.size(); i++) {
+                        if (i != currentPlayerIndex) {
+                            totalPoints += UnoScorer.calculateHandScore(playerHands.get(i));
+                        }
+                    }
+                    logger.info("Game finished. Winner: " + name + " with " + totalPoints + " points.");
+                    if (!quiet) {
+                        System.out.println("\n*** " + name + " wins the round! ***");
+                        System.out.println(name + " scores " + totalPoints + " points!");
+                    }
                     return true;
                 }
 
-                String cardRank = UnoRules.rank(card);
-                if (cardRank.equals("DRAW_TWO") && !quiet) {
-                    System.out.println(state.playerNames.get(getNextPlayerIndex(1)) + " draws two.");
-                } else if (cardRank.equals("WILD_DRAW_FOUR") && !quiet) {
-                    System.out.println(state.playerNames.get(getNextPlayerIndex(1)) + " draws four.");
-                }
+                // --- STEP 4: APPLY EFFECTS ---
+                int nextIndex = (turnManager.isClockwise() ? (currentPlayerIndex + 1) : (currentPlayerIndex - 1 + playerNames.size())) % playerNames.size();
+                List<UnoCard> nextHand = playerHands.get(nextIndex);
 
-                state.applyAction(cardRank);
-            } else {
-                state.nextPlayer();
+                if (chosenCard.getType() == CardType.SKIP) {
+                    if (!quiet) System.out.println("Next player is skipped!");
+                    turnManager.playSkip();
+                } else if (chosenCard.getType() == CardType.REVERSE) {
+                    if (!quiet) System.out.println("Direction is reversed!");
+                    turnManager.playReverse();
+                } else if (chosenCard.getType() == CardType.DRAW_TWO) {
+                    if (!quiet) System.out.println("Next player draws two and is skipped!");
+                    CardEffectHandler.applyDrawTwo(turnManager, deck, nextHand);
+                } else if (chosenCard.getType() == CardType.WILD_DRAW_FOUR) {
+                    if (!quiet) System.out.println("Next player draws four and is skipped!");
+                    CardEffectHandler.applyWildDrawFour(turnManager, deck, nextHand);
+                }
             }
+
+            turnManager.moveToNextPlayer();
         }
 
         logger.warning("Game stopped at 3000 turn safety limit.");
@@ -119,46 +151,51 @@ public class GameEngine {
         return false;
     }
 
-    private int getNextPlayerIndex(int offset) {
-        int idx = state.currentPlayer + (state.direction * offset);
-        while (idx >= state.playerNames.size()) idx -= state.playerNames.size();
-        while (idx < 0) idx += state.playerNames.size();
-        return idx;
-    }
-
-    private int askHuman(ArrayList<String> hand) {
+    private UnoCard askHumanPlay(List<UnoCard> hand) {
         while (true) {
-            System.out.print("Choose card index/code or draw: ");
+            System.out.print("Choose card index (0 to " + (hand.size() - 1) + ") or 'D' to draw: ");
             String input = scanner.nextLine().trim().toUpperCase();
-            if (input.equals("DRAW")) return -1;
+
+            if (input.equals("D") || input.equals("DRAW")) {
+                return null;
+            }
+
             try {
                 int index = Integer.parseInt(input);
-                if (index >= 0 && index < hand.size()) return index;
-            } catch (Exception ignored) {}
-            for (int i = 0; i < hand.size(); i++) {
-                if (hand.get(i).equals(input)) {
-                    if (UnoRules.isLegal(hand.get(i), state.upCard, state.calledColor)) return i;
-                    System.out.println("That card is not legal.");
+                if (index >= 0 && index < hand.size()) {
+                    UnoCard card = hand.get(index);
+                    if (UnoRuleValidator.isLegalPlay(card, topCard, activeColor)) {
+                        return card;
+                    } else {
+                        System.out.println("That card is not legal to play on top of " + topCard + ".");
+                    }
+                } else {
+                    System.out.println("Invalid index.");
                 }
+            } catch (NumberFormatException e) {
+                System.out.println("Please enter a valid number or 'D'.");
             }
-            System.out.println("Card not found.");
         }
     }
 
-    private String askColor() {
+    private CardColor askColor() {
         while (true) {
-            System.out.print("Call color R/Y/G/B: ");
+            System.out.print("Call color (R/Y/G/B): ");
             String input = scanner.nextLine().trim().toUpperCase();
-            if (input.equals("R") || input.equals("Y") || input.equals("G") || input.equals("B")) return input;
-            System.out.println("Bad color.");
+            switch (input) {
+                case "R": return CardColor.RED;
+                case "Y": return CardColor.YELLOW;
+                case "G": return CardColor.GREEN;
+                case "B": return CardColor.BLUE;
+            }
+            System.out.println("Invalid color. Use R, Y, G, or B.");
         }
     }
 
-    private String join(ArrayList<String> cards) {
+    private String join(List<UnoCard> cards) {
         StringBuilder out = new StringBuilder();
         for (int i = 0; i < cards.size(); i++) {
-            out.append(i).append(":").append(cards.get(i));
-            if (i < cards.size() - 1) out.append(" ");
+            out.append(i).append(":[").append(cards.get(i)).append("] ");
         }
         return out.toString();
     }

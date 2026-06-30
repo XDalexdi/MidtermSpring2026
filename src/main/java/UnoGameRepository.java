@@ -6,7 +6,6 @@ import java.util.List;
 
 public class UnoGameRepository implements AutoCloseable {
     private final EntityManagerFactory emf;
-
     public UnoGameRepository() {
         // This MUST match the exact unit name defined inside META-INF/persistence.xml
         this.emf = Persistence.createEntityManagerFactory("uno-unit");
